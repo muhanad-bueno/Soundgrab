@@ -52,11 +52,29 @@ fn map_error(stderr: &str) -> String {
     }
 }
 
+fn slug_from_url(url: &str) -> Option<&str> {
+    // last non-empty path segment, e.g. "my-cool-track" from ".../my-cool-track"
+    url.trim_end_matches('/').rsplit('/').find(|s| !s.is_empty())
+}
+
 fn parse_track(json: &str) -> Option<TrackMeta> {
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
+
+    // SoundCloud flat-playlist entries may use track_title instead of title
+    let title = v["title"].as_str().filter(|s| !s.is_empty())
+        .or_else(|| v["track_title"].as_str().filter(|s| !s.is_empty()))
+        .or_else(|| v["ie_entry"].as_str().filter(|s| !s.is_empty()))
+        .or_else(|| {
+            v["webpage_url"].as_str()
+                .or_else(|| v["original_url"].as_str())
+                .and_then(slug_from_url)
+        })
+        .unwrap_or("Unknown")
+        .to_string();
+
     Some(TrackMeta {
         id: v["id"].as_str().unwrap_or("").to_string(),
-        title: v["title"].as_str().unwrap_or("Unknown").to_string(),
+        title,
         uploader: v["uploader"]
             .as_str()
             .or_else(|| v["channel"].as_str())
@@ -108,10 +126,6 @@ pub async fn detect_and_fetch(app: &tauri::AppHandle, url: &str) -> Result<UrlKi
         1 => Ok(UrlKind::Single(tracks.into_iter().next().unwrap())),
         _ => Ok(UrlKind::Playlist(tracks)),
     }
-}
-
-fn is_youtube(url: &str) -> bool {
-    url.contains("youtube.com") || url.contains("youtu.be")
 }
 
 fn is_tiktok(url: &str) -> bool {
