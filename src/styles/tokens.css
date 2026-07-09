@@ -1,0 +1,16 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&family=Inter:wght@400;500&display=swap");
+
+@import "tailwindcss";
+
+:root {
+  --paper:        #F7F5F0;
+  --ink:          #1A1A1A;
+  --grab-red:     #FF4B2B;
+  --signal-blue:  #0057FF;
+  --line:         #DDD8CC;
+  --success:      #2E9E5B;
+
+  font-family: Inter, sans-serif;
+  background-color: var(--paper);
+  color: var(--ink);
+}
