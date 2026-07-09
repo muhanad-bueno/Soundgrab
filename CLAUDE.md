@@ -46,7 +46,7 @@ ffmpeg is NOT bundled. On first launch, the app downloads the LGPL Windows build
 - No dark mode, no sidebar, no routing — single view only
 
 ## Build phases (track progress here)
-- [ ] Phase 0 — Scaffolding (Tauri + React + Tailwind + tokens.css)
+- [x] Phase 0 — Scaffolding (Tauri + React + Tailwind + tokens.css)
 - [ ] Phase 1 — Core download engine (Rust: ytdlp.rs, commands.rs)
 - [ ] Phase 2 — Format & quality verification (manual test matrix)
 - [ ] Phase 3 — Frontend UI (all components + App.tsx state machine)
