@@ -17,15 +17,27 @@ impl DlSem {
     }
 }
 
+// Returns the exe's directory if a _portable marker file exists next to it,
+// otherwise returns the standard app data dir.
+fn get_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or("cannot resolve exe directory")?;
+    if exe_dir.join("_portable").exists() {
+        return Ok(exe_dir);
+    }
+    app.path().app_data_dir().map_err(|e| e.to_string())
+}
+
 fn ffmpeg_path(app: &tauri::AppHandle) -> Result<String, String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let data_dir = get_data_dir(app)?;
     let cached = data_dir.join("ffmpeg.exe");
     if cached.exists() {
         return Ok(cached.to_string_lossy().into_owned());
     }
+    // dev fallback: binaries/ next to the dev exe
     let dev_path: PathBuf = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("binaries").join("ffmpeg.exe")))
@@ -79,10 +91,7 @@ pub async fn check_ffmpeg(app: tauri::AppHandle) -> bool {
 
 #[tauri::command]
 pub async fn setup_ffmpeg(app: tauri::AppHandle) -> Result<(), String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let data_dir = get_data_dir(&app)?;
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
 
     let dest = data_dir.join("ffmpeg.exe");
@@ -124,6 +133,12 @@ pub async fn setup_ffmpeg(app: tauri::AppHandle) -> Result<(), String> {
     }
 
     Err("ffmpeg.exe not found inside the downloaded archive.".into())
+}
+
+#[tauri::command]
+pub async fn get_store_path(app: tauri::AppHandle) -> Result<String, String> {
+    let path = get_data_dir(&app)?.join("settings.json");
+    Ok(path.to_string_lossy().into_owned())
 }
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");

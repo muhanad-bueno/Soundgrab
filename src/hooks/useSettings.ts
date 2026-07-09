@@ -28,7 +28,9 @@ export function useSettings() {
 
   useEffect(() => {
     let alive = true;
-    load("settings.json", { defaults: DEFAULTS as unknown as Record<string, unknown> }).then(async (store) => {
+    invoke<string>("get_store_path").then((storePath) =>
+      load(storePath, { defaults: DEFAULTS as unknown as Record<string, unknown> })
+    ).then(async (store) => {
       if (!alive) return;
       storeRef.current = store;
       const saved: Partial<Settings> = {};

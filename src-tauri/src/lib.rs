@@ -20,6 +20,7 @@ pub fn run() {
             commands::update_ytdlp,
             commands::set_concurrency,
             commands::check_for_update,
+            commands::get_store_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
