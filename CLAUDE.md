@@ -77,7 +77,7 @@ ffmpeg is NOT bundled. On first launch, the app downloads the LGPL Windows build
     - All settings persisted in a single `settings.json` via tauri-plugin-store; loaded on startup before first render
     - Done when: settings survive app restart, dark mode looks correct, all sliders/toggles take effect on next download
 - [x] Phase 5 — Packaging (.msi, icons, clean-machine test)
-- [ ] Phase 6 — Open source readiness (README, LICENSE, CI release workflow)
+- [x] Phase 6 — Open source readiness (README, LICENSE, CI release workflow)
 
 ## Rules for this project
 - Match SOP exactly — no architectural decisions beyond what's specced
