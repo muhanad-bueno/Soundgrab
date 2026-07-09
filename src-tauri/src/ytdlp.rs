@@ -57,12 +57,20 @@ fn parse_track(json: &str) -> Option<TrackMeta> {
     })
 }
 
+fn validate_url(url: &str) -> Result<(), String> {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err("Only http:// and https:// URLs are supported.".into());
+    }
+    Ok(())
+}
+
 pub async fn detect_and_fetch(app: &tauri::AppHandle, url: &str) -> Result<UrlKind, String> {
+    validate_url(url)?;
     let output = app
         .shell()
         .sidecar("yt-dlp")
         .map_err(|e| e.to_string())?
-        .args(["--flat-playlist", "--dump-json", "--no-warnings", url])
+        .args(["--flat-playlist", "--dump-json", "--no-warnings", "--", url])
         .output()
         .await
         .map_err(|e| e.to_string())?;
@@ -94,6 +102,7 @@ pub async fn download_track(
     ffmpeg_path: &str,
     event_id: &str,
 ) -> Result<(), String> {
+    validate_url(url)?;
     let progress_re = Regex::new(r"\[download\]\s+(\d+\.?\d*)%").unwrap();
 
     let mut args = vec![
@@ -114,6 +123,7 @@ pub async fn download_track(
         args.push("320K".to_string());
     }
 
+    args.push("--".to_string());
     args.push(url.to_string());
 
     let (mut rx, _child) = app

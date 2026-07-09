@@ -1,4 +1,5 @@
 use crate::ytdlp::{self, UrlKind};
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use tauri::{Emitter, Manager};
 
@@ -58,9 +59,12 @@ pub async fn setup_ffmpeg(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    // gyan.dev LGPL essentials build (small, ~10MB zip, extract ffmpeg.exe)
-    // ponytail: direct exe download from a trusted mirror avoids zip extraction in Rust
+    // gyan.dev LGPL essentials build — version pinned, hash pinned
     let url = "https://github.com/GyanD/codexffmpeg/releases/download/7.1.1/ffmpeg-7.1.1-essentials_build.zip";
+    // SHA256 of ffmpeg-7.1.1-essentials_build.zip (verified 2026-07-09)
+    const EXPECTED_SHA256: &str =
+        "04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4";
+
     let _ = app.emit("setup-progress", serde_json::json!({ "status": "downloading" }));
 
     let response = reqwest::get(url)
@@ -70,6 +74,14 @@ pub async fn setup_ffmpeg(app: tauri::AppHandle) -> Result<(), String> {
         .bytes()
         .await
         .map_err(|e| format!("Failed to read ffmpeg download: {e}"))?;
+
+    // Verify integrity before touching disk
+    let actual = hex::encode(Sha256::digest(&bytes));
+    if actual != EXPECTED_SHA256 {
+        return Err(format!(
+            "ffmpeg download integrity check failed (got {actual}). Aborting."
+        ));
+    }
 
     // Extract ffmpeg.exe from the zip
     let cursor = std::io::Cursor::new(bytes);
