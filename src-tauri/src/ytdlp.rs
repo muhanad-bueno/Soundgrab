@@ -3,6 +3,13 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use tauri_plugin_shell::ShellExt;
 
+#[derive(Deserialize, Debug)]
+pub struct DownloadOptions {
+    pub concurrent_fragments: u8,
+    pub embed_thumbnail: bool,
+    pub embed_metadata: bool,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TrackMeta {
     pub id: String,
@@ -31,6 +38,15 @@ fn map_error(stderr: &str) -> String {
         "This track is age-restricted and can't be downloaded.".into()
     } else if stderr.contains("This video does not exist") || stderr.contains("404") {
         "This link doesn't point to a valid track.".into()
+    } else if stderr.contains("requires premium") || stderr.contains("Go+") {
+        "This track requires a SoundCloud Go+ subscription.".into()
+    } else if stderr.contains("Could not find media") || stderr.contains("No video formats found") {
+        "This TikTok may be private, removed, or geo-restricted.".into()
+    } else if !stderr.is_empty() {
+        // surface the raw yt-dlp message so we can add a pattern for it
+        let last = stderr.lines().filter(|l| l.contains("ERROR")).last()
+            .unwrap_or(stderr.lines().last().unwrap_or("unknown error"));
+        format!("yt-dlp: {}", last.trim())
     } else {
         "Couldn't download this — the link may be invalid or the content unavailable.".into()
     }
@@ -94,6 +110,27 @@ pub async fn detect_and_fetch(app: &tauri::AppHandle, url: &str) -> Result<UrlKi
     }
 }
 
+fn is_youtube(url: &str) -> bool {
+    url.contains("youtube.com") || url.contains("youtu.be")
+}
+
+fn is_tiktok(url: &str) -> bool {
+    url.contains("tiktok.com")
+}
+
+fn is_soundcloud(url: &str) -> bool {
+    url.contains("soundcloud.com")
+}
+
+pub async fn update_ytdlp(app: &tauri::AppHandle) {
+    // fire-and-forget: failure is silent, never blocks startup
+    let _ = app
+        .shell()
+        .sidecar("yt-dlp")
+        .map(|s| s.args(["--update-to", "stable"]))
+        .map(|s| tokio::spawn(async move { let _ = s.output().await; }));
+}
+
 pub async fn download_track(
     app: &tauri::AppHandle,
     url: &str,
@@ -101,30 +138,37 @@ pub async fn download_track(
     output_dir: &str,
     ffmpeg_path: &str,
     event_id: &str,
+    opts: &DownloadOptions,
 ) -> Result<(), String> {
     validate_url(url)?;
     let progress_re = Regex::new(r"\[download\]\s+(\d+\.?\d*)%").unwrap();
 
+    // TikTok rate-limits hard — cap fragments at 1 regardless of user setting
+    let frag_count = if is_tiktok(url) { 1 } else { opts.concurrent_fragments };
+
+    // always use -x; yt-dlp skips transcode automatically when source codec matches target
     let mut args = vec![
         "-x".to_string(),
-        "--audio-format".to_string(),
-        format.to_string(),
-        "--embed-metadata".to_string(),
-        "--embed-thumbnail".to_string(),
-        "--ffmpeg-location".to_string(),
-        ffmpeg_path.to_string(),
-        "-o".to_string(),
-        format!("{}/%(title)s.%(ext)s", output_dir),
-        "--newline".to_string(),
+        "--audio-format".to_string(), format.to_string(),
     ];
-
     if format == "mp3" {
         args.push("--audio-quality".to_string());
-        args.push("320K".to_string());
+        args.push("0".to_string()); // VBR best
     }
 
-    args.push("--".to_string());
-    args.push(url.to_string());
+    if opts.embed_metadata { args.push("--embed-metadata".to_string()); }
+    if opts.embed_thumbnail { args.push("--embed-thumbnail".to_string()); }
+    if is_soundcloud(url) { args.push("--no-playlist-reverse".to_string()); }
+
+    args.extend([
+        "--concurrent-fragments".to_string(), frag_count.to_string(),
+        "--ffmpeg-location".to_string(), ffmpeg_path.to_string(),
+        "-o".to_string(), format!("{}/%(title)s.%(ext)s", output_dir),
+        "--windows-filenames".to_string(),
+        "--newline".to_string(),
+        "--".to_string(),
+        url.to_string(),
+    ]);
 
     let (mut rx, _child) = app
         .shell()
@@ -133,6 +177,8 @@ pub async fn download_track(
         .args(&args)
         .spawn()
         .map_err(|e| e.to_string())?;
+
+    let mut stderr_buf = String::new();
 
     while let Some(event) = rx.recv().await {
         match event {
@@ -148,23 +194,14 @@ pub async fn download_track(
             }
             tauri_plugin_shell::process::CommandEvent::Stderr(line) => {
                 let text = String::from_utf8_lossy(&line);
-                // surface fatal errors only
-                if text.contains("ERROR") {
-                    let _ = app.emit(
-                        "download-error",
-                        serde_json::json!({ "id": event_id, "message": map_error(&text) }),
-                    );
-                }
+                stderr_buf.push_str(&text);
             }
             tauri_plugin_shell::process::CommandEvent::Error(e) => {
                 return Err(e);
             }
             tauri_plugin_shell::process::CommandEvent::Terminated(status) => {
                 if status.code != Some(0) {
-                    return Err(
-                        "Download process exited with an error. The content may be unavailable."
-                            .into(),
-                    );
+                    return Err(map_error(&stderr_buf));
                 }
                 break;
             }

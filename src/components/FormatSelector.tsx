@@ -1,4 +1,4 @@
-const FORMATS = ["mp3", "flac", "opus"] as const;
+const FORMATS = ["mp3", "flac", "opus", "m4a"] as const;
 export type AudioFormat = (typeof FORMATS)[number];
 
 interface Props {

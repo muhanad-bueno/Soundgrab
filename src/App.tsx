@@ -1,22 +1,24 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { UrlInput } from "./components/UrlInput";
 import { TrackPreview } from "./components/TrackPreview";
 import { PlaylistTable } from "./components/PlaylistTable";
 import { FormatSelector, type AudioFormat } from "./components/FormatSelector";
 import { FolderPicker } from "./components/FolderPicker";
 import { GrabButton } from "./components/GrabButton";
+import { SettingsModal } from "./components/SettingsModal";
 import { useDownloadEvents } from "./hooks/useDownloadEvents";
+import { useSettings } from "./hooks/useSettings";
 import { Logo } from "./components/Logo";
 import type { TrackMeta, UrlKind } from "./types";
 
 // ── state machine ────────────────────────────────────────────────────────────
 
 type Phase =
-  | { tag: "setup" }           // ffmpeg not ready, downloading it
+  | { tag: "setup" }
   | { tag: "idle" }
-  | { tag: "resolving" }       // fetch_metadata in flight
+  | { tag: "resolving" }
   | { tag: "previewing"; kind: Extract<UrlKind, { type: "Single" | "Playlist" }> }
   | { tag: "downloading"; kind: Extract<UrlKind, { type: "Single" | "Playlist" }>; progress: Record<string, number> }
   | { tag: "done"; kind: Extract<UrlKind, { type: "Single" | "Playlist" }> }
@@ -58,26 +60,39 @@ function reducer(state: Phase, action: Action): Phase {
 
 export default function App() {
   const [phase, dispatch] = useReducer(reducer, { tag: "setup" });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const { settings, update: updateSetting } = useSettings();
+
   const urlRef = useRef("");
   const formatRef = useRef<AudioFormat>("mp3");
   const folderRef = useRef("");
 
-  // Force re-render when refs change (they're controlled imperatively for perf)
   const [, tick] = useReducer((n: number) => n + 1, 0);
   function setUrl(v: string) { urlRef.current = v; tick(); }
   function setFormat(v: AudioFormat) { formatRef.current = v; tick(); }
   function setFolder(v: string) { folderRef.current = v; tick(); }
 
-  // ffmpeg first-run setup
+  // Pre-fill folder from persisted setting once loaded
+  useEffect(() => {
+    if (settings.defaultFolder && !folderRef.current) {
+      setFolder(settings.defaultFolder);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.defaultFolder]);
+
+  // ffmpeg first-run setup + background yt-dlp update
   useEffect(() => {
     invoke<boolean>("check_ffmpeg").then((ready) => {
       if (ready) {
         dispatch({ type: "READY" });
+        invoke("update_ytdlp");
       } else {
         dispatch({ type: "SETUP_NEEDED" });
-        // listen for setup-progress from Rust
         const unsub = listen<{ status: string }>("setup-progress", (e) => {
-          if (e.payload.status === "done") dispatch({ type: "READY" });
+          if (e.payload.status === "done") {
+            dispatch({ type: "READY" });
+            invoke("update_ytdlp");
+          }
         });
         invoke("setup_ffmpeg").catch((e: unknown) =>
           dispatch({ type: "ERROR", message: String(e) })
@@ -87,7 +102,6 @@ export default function App() {
     });
   }, []);
 
-  // download event listeners
   useDownloadEvents(
     (id, percent) => dispatch({ type: "PROGRESS", id, percent }),
     (_id, message) => dispatch({ type: "ERROR", message }),
@@ -119,24 +133,29 @@ export default function App() {
     const tracks: TrackMeta[] =
       phase.kind.type === "Single" ? [phase.kind.data] : phase.kind.data;
 
-    try {
-      // run downloads sequentially (Phase 4 adds concurrency cap)
-      for (const track of tracks) {
+    const opts = {
+      concurrent_fragments: settings.concurrentFragments,
+      embed_thumbnail: settings.embedThumbnail,
+      embed_metadata: settings.embedMetadata,
+    };
+
+    await Promise.all(
+      tracks.map((track) => {
         const trackUrl = track.webpage_url || track.url || urlRef.current;
-        await invoke("start_download", {
+        return invoke("start_download", {
           url: trackUrl,
           format: formatRef.current,
           outputDir: folder,
           eventId: track.id,
+          opts,
+        }).catch((e: unknown) => {
+          dispatch({ type: "ERROR", message: String(e) });
         });
-      }
-      dispatch({ type: "DONE" });
-    } catch (e) {
-      dispatch({ type: "ERROR", message: String(e) });
-    }
+      })
+    );
+    dispatch({ type: "DONE" });
   }
 
-  // derived
   const busy = phase.tag === "resolving" || phase.tag === "downloading" || phase.tag === "setup";
   const tracks: TrackMeta[] | null =
     phase.tag === "previewing" || phase.tag === "downloading" || phase.tag === "done"
@@ -163,7 +182,7 @@ export default function App() {
         {/* header */}
         <div className="flex items-center gap-3">
           <Logo size={36} />
-          <div>
+          <div className="flex-1">
             <h1
               className="text-3xl font-bold tracking-tight leading-none"
               style={{ fontFamily: "Space Grotesk, sans-serif", color: "var(--ink)" }}
@@ -174,6 +193,14 @@ export default function App() {
               Download audio from YouTube & SoundCloud
             </p>
           </div>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="p-2 rounded-lg hover:bg-[var(--line)] transition-colors"
+            aria-label="Open settings"
+            title="Settings"
+          >
+            <GearIcon />
+          </button>
         </div>
 
         {/* setup state */}
@@ -265,6 +292,23 @@ export default function App() {
           </>
         )}
       </div>
+
+      {settingsOpen && (
+        <SettingsModal
+          settings={settings}
+          onUpdate={updateSetting}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--ink)" }}>
+      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
   );
 }

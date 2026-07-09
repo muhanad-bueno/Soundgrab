@@ -15,7 +15,8 @@
         "title": "Soundgrab",
         "width": 720,
         "height": 640,
-        "resizable": true
+        "resizable": true,
+        "maximized": true
       }
     ],
     "security": {

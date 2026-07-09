@@ -14,3 +14,26 @@
   background-color: var(--paper);
   color: var(--ink);
 }
+
+/* range thumb — Chromium only uses ::-webkit-slider-thumb */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--grab-red);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  margin-top: -6px;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+}
+
+[data-theme="dark"] {
+  --paper:  #141414;
+  --ink:    #F0EDE8;
+  --line:   #2A2A2A;
+}
