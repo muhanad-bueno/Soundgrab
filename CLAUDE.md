@@ -78,6 +78,43 @@ ffmpeg is NOT bundled. On first launch, the app downloads the LGPL Windows build
     - Done when: settings survive app restart, dark mode looks correct, all sliders/toggles take effect on next download
 - [x] Phase 5 — Packaging (.msi, icons, clean-machine test)
 - [x] Phase 6 — Open source readiness (README, LICENSE, CI release workflow)
+- [ ] Phase 7 — Auto-updater + portable build
+    ### 7a — Auto-updater (tauri-plugin-updater)
+    - Add `tauri-plugin-updater = "2"` to Cargo.toml and register `.plugin(tauri_plugin_updater::Builder::new().build())` in lib.rs
+    - Add `@tauri-apps/plugin-updater` to package.json
+    - On app startup (after ffmpeg check, non-blocking), call `check()` from the updater plugin
+    - If an update is available, emit a Tauri event `update-available` with `{ version, body }` to the frontend
+    - Frontend shows a dismissable banner: "Soundgrab vX.Y.Z is available — download" with a link to the GitHub Release page
+    - **Do NOT auto-install** — open the browser to the release page instead (`tauri-plugin-opener`). Reason: unsigned installer; Windows SmartScreen blocks silent execution. User downloads and runs the new .msi manually. This avoids the code-signing requirement entirely.
+    - Update endpoint: a static `latest.json` file uploaded as a GitHub Release asset alongside the .msi each release. Format:
+      ```json
+      {
+        "version": "0.2.0",
+        "notes": "What changed",
+        "pub_date": "2026-07-09T00:00:00Z",
+        "platforms": {
+          "windows-x86_64": {
+            "url": "https://github.com/muhanad-bueno/Soundgrab/releases/download/v0.2.0/Soundgrab_0.2.0_x64_en-US.msi",
+            "signature": ""
+          }
+        }
+      }
+      ```
+    - Point `tauri.conf.json` updater endpoint at the v0.1.0 release's `latest.json` URL (update this URL each release)
+    - Add `latest.json` generation to the release process in CHANGELOG.md and memory
+    - Done when: running v0.1.0 with a v0.2.0 `latest.json` live shows the update banner; dismissing it stays dismissed for the session
+
+    ### 7b — Portable build
+    - Add `"nsis"` to `bundle.targets` in tauri.conf.json alongside `"msi"`. NSIS supports a `/portable` installer type.
+    - Detect portable mode at runtime: check if a `_portable` marker file exists next to the exe (standard convention). In Rust: `std::env::current_exe().parent().join("_portable").exists()`.
+    - If portable: override all data paths to use the exe's directory instead of `%APPDATA%`:
+        - ffmpeg cache: write `ffmpeg.exe` next to the exe, not in `app_data_dir`
+        - tauri-plugin-store: construct the store with an explicit path (`exe_dir/settings.json`) instead of the default app data path. Use `StoreBuilder::new(app, path)` with the overridden path.
+        - yt-dlp sidecar: already resolves relative to exe — no change needed
+    - Add a `get_data_dir(app)` helper in commands.rs that returns `exe_dir` in portable mode, `app_data_dir` otherwise. Use it everywhere a path is currently hardcoded to `app_data_dir`.
+    - Portable release artifact: after `npm run tauri build`, the NSIS output is at `src-tauri/target/release/bundle/nsis/Soundgrab_x.y.z_x64-setup.exe`. Rename to `Soundgrab_x.y.z_x64_portable.exe` and upload alongside the .msi on GitHub Releases.
+    - Include a `_portable` marker file in the portable bundle (NSIS script or post-build step).
+    - Done when: portable .exe runs from a USB drive with no installation, settings persist in the same folder, ffmpeg downloads to that folder, no writes to %APPDATA%.
 
 ## Rules for this project
 - Match SOP exactly — no architectural decisions beyond what's specced
