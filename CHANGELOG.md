@@ -11,6 +11,15 @@ Versions follow [Semantic Versioning](https://semver.org).
 
 ---
 
+## [0.2.1] — 2026-07-09
+
+### Fixed
+- SoundCloud playlist tracks still showing UUID strings as titles; dropped `--flat-playlist` for SoundCloud URLs so yt-dlp fetches full metadata with real track names
+- MSI setup wizard now shows Soundgrab branding (custom dialog and banner bitmaps) instead of generic WiX graphics
+- NSIS setup wizard now shows the Soundgrab icon
+
+---
+
 ## [0.2.0] — 2026-07-09
 
 ### Added

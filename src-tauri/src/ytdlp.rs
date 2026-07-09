@@ -100,11 +100,18 @@ fn validate_url(url: &str) -> Result<(), String> {
 
 pub async fn detect_and_fetch(app: &tauri::AppHandle, url: &str) -> Result<UrlKind, String> {
     validate_url(url)?;
+    // SoundCloud flat-playlist stubs contain UUIDs instead of real titles;
+    // skip --flat-playlist for SC so yt-dlp fetches full metadata per track.
+    let mut base_args = vec!["--dump-json", "--no-warnings", "--"];
+    if !is_soundcloud(url) {
+        base_args.insert(0, "--flat-playlist");
+    }
+    base_args.push(url);
     let output = app
         .shell()
         .sidecar("yt-dlp")
         .map_err(|e| e.to_string())?
-        .args(["--flat-playlist", "--dump-json", "--no-warnings", "--", url])
+        .args(&base_args)
         .output()
         .await
         .map_err(|e| e.to_string())?;
