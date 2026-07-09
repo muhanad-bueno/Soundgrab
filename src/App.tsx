@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { UrlInput } from "./components/UrlInput";
 import { TrackPreview } from "./components/TrackPreview";
@@ -8,6 +9,7 @@ import { FormatSelector, type AudioFormat } from "./components/FormatSelector";
 import { FolderPicker } from "./components/FolderPicker";
 import { GrabButton } from "./components/GrabButton";
 import { SettingsModal } from "./components/SettingsModal";
+import { InfoModal } from "./components/InfoModal";
 import { useDownloadEvents } from "./hooks/useDownloadEvents";
 import { useSettings } from "./hooks/useSettings";
 import { Logo } from "./components/Logo";
@@ -61,6 +63,9 @@ function reducer(state: Phase, action: Action): Phase {
 export default function App() {
   const [phase, dispatch] = useReducer(reducer, { tag: "setup" });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{ version: string; body: string } | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
   const { settings, update: updateSetting } = useSettings();
 
   const urlRef = useRef("");
@@ -80,18 +85,24 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.defaultFolder]);
 
-  // ffmpeg first-run setup + background yt-dlp update
+  // ffmpeg first-run setup + background yt-dlp update + app update check
   useEffect(() => {
+    const unsubUpdate = listen<{ version: string; body: string }>("update-available", (e) => {
+      setUpdateInfo(e.payload);
+    });
+
     invoke<boolean>("check_ffmpeg").then((ready) => {
       if (ready) {
         dispatch({ type: "READY" });
         invoke("update_ytdlp");
+        invoke("check_for_update");
       } else {
         dispatch({ type: "SETUP_NEEDED" });
         const unsub = listen<{ status: string }>("setup-progress", (e) => {
           if (e.payload.status === "done") {
             dispatch({ type: "READY" });
             invoke("update_ytdlp");
+            invoke("check_for_update");
           }
         });
         invoke("setup_ffmpeg").catch((e: unknown) =>
@@ -100,6 +111,8 @@ export default function App() {
         return () => { unsub.then((f) => f()); };
       }
     });
+
+    return () => { unsubUpdate.then((f) => f()); };
   }, []);
 
   useDownloadEvents(
@@ -194,6 +207,14 @@ export default function App() {
             </p>
           </div>
           <button
+            onClick={() => setInfoOpen(true)}
+            className="p-2 rounded-lg hover:bg-[var(--line)] transition-colors"
+            aria-label="About Soundgrab"
+            title="About"
+          >
+            <InfoIcon />
+          </button>
+          <button
             onClick={() => setSettingsOpen(true)}
             className="p-2 rounded-lg hover:bg-[var(--line)] transition-colors"
             aria-label="Open settings"
@@ -202,6 +223,31 @@ export default function App() {
             <GearIcon />
           </button>
         </div>
+
+        {/* update available banner */}
+        {updateInfo && !updateDismissed && (
+          <div
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-[Inter]"
+            style={{ borderColor: "var(--signal-blue)", color: "var(--signal-blue)", background: "rgba(0,87,255,0.05)" }}
+          >
+            <span className="flex-1">
+              Soundgrab v{updateInfo.version} is available.{" "}
+              <button
+                className="underline font-semibold"
+                onClick={() => openUrl("https://github.com/muhanad-bueno/Soundgrab/releases/latest")}
+              >
+                Download
+              </button>
+            </span>
+            <button
+              className="opacity-50 hover:opacity-100 text-base leading-none"
+              onClick={() => setUpdateDismissed(true)}
+              aria-label="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* setup state */}
         {phase.tag === "setup" && (
@@ -300,7 +346,21 @@ export default function App() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+
+      {infoOpen && (
+        <InfoModal onClose={() => setInfoOpen(false)} />
+      )}
     </div>
+  );
+}
+
+function InfoIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--ink)" }}>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="16" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12.01" y2="8" />
+    </svg>
   );
 }
 

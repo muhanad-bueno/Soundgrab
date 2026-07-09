@@ -125,3 +125,24 @@ pub async fn setup_ffmpeg(app: tauri::AppHandle) -> Result<(), String> {
 
     Err("ffmpeg.exe not found inside the downloaded archive.".into())
 }
+
+const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+const LATEST_JSON_URL: &str =
+    "https://github.com/muhanad-bueno/Soundgrab/releases/latest/download/latest.json";
+
+#[tauri::command]
+pub async fn check_for_update(app: tauri::AppHandle) -> Result<(), String> {
+    tokio::spawn(async move {
+        let Ok(resp) = reqwest::get(LATEST_JSON_URL).await else { return; };
+        let Ok(json) = resp.json::<serde_json::Value>().await else { return; };
+        let Some(latest) = json["version"].as_str() else { return; };
+        if latest != CURRENT_VERSION {
+            let body = json["notes"].as_str().unwrap_or("").to_string();
+            let _ = app.emit("update-available", serde_json::json!({
+                "version": latest,
+                "body": body,
+            }));
+        }
+    });
+    Ok(())
+}
